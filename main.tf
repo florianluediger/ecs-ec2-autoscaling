@@ -34,20 +34,20 @@ resource "aws_ecs_cluster" "main" {
 resource "aws_security_group" "ecs_sg" {
   name        = "ecs-sg"
   description = "Security group for ECS instances"
-  vpc_id = module.vpc.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Allow all traffic from within the SG"
-    from_port = 0
-    to_port = 0
-    protocol = "-1"
-    self = true
-  }
-
-  egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
+    self        = true
+  }
+
+  egress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
@@ -82,36 +82,43 @@ resource "aws_iam_instance_profile" "ecs_instance_profile" {
 
 data "aws_ami" "ecs_ami" {
   most_recent = true
-  owners      = ["amazon"]
+  owners = ["amazon"]
 
   # The AMI is optimized for use with ECS and it contains the ECS Agent
   filter {
-    name   = "name"
+    name = "name"
     values = ["al2023-ami-ecs-hvm-*"]
   }
 }
 
-resource "aws_launch_configuration" "ecs_lc" {
-  name_prefix          = "ecs-lc-"
-  image_id             = data.aws_ami.ecs_ami.id
-  instance_type        = "t3.micro"
-  iam_instance_profile = aws_iam_instance_profile.ecs_instance_profile.name
-  security_groups      = [aws_security_group.ecs_sg.id]
+resource "aws_launch_template" "ecs_lt" {
+  name_prefix   = "ecs-lt-"
+  image_id      = data.aws_ami.ecs_ami.id
+  instance_type = "t3.micro"
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ecs_instance_profile.name
+  }
+  vpc_security_group_ids = [aws_security_group.ecs_sg.id]
   # It is necessary to configure the ECS Cluster name for the ECS Agent so the Instance can register itself
-  user_data = <<-EOF
+  user_data = base64encode(<<-EOF
               #!/bin/bash
               echo ECS_CLUSTER=${aws_ecs_cluster.main.name} >> /etc/ecs/ecs.config
               EOF
+  )
+  update_default_version = true
 }
 
 resource "aws_autoscaling_group" "ecs_asg" {
-  name                      = "ecs-asg"
-  launch_configuration      = aws_launch_configuration.ecs_lc.name
-  min_size                  = 0
-  max_size                  = 3
-  desired_capacity          = 0
-  vpc_zone_identifier       = module.vpc.private_subnets
-  health_check_type         = "EC2"
+  name = "ecs-asg"
+  launch_template {
+    id      = aws_launch_template.ecs_lt.id
+    version = "$Latest"
+  }
+  min_size            = 0
+  max_size            = 3
+  desired_capacity    = 0
+  vpc_zone_identifier = module.vpc.private_subnets
+  health_check_type   = "EC2"
 }
 
 resource "aws_ecs_capacity_provider" "ecs_capacity_provider" {
@@ -122,8 +129,8 @@ resource "aws_ecs_capacity_provider" "ecs_capacity_provider" {
       maximum_scaling_step_size = 3
       minimum_scaling_step_size = 1
       # The target capacity needs to be 100 for scaling down to zero
-      target_capacity = 100
-      status = "ENABLED"
+      target_capacity           = 100
+      status                    = "ENABLED"
     }
   }
 }
@@ -134,11 +141,11 @@ resource "aws_ecs_cluster_capacity_providers" "ecs_cluster_capacity_providers" {
 }
 
 resource "aws_ecs_task_definition" "nginx_task" {
-  family                   = "nginx-task"
+  family       = "nginx-task"
   requires_compatibilities = ["EC2"]
-  network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 128
+  network_mode = "awsvpc"
+  cpu          = 256
+  memory       = 128
   container_definitions = jsonencode([
     {
       name      = "nginx-container"
@@ -149,15 +156,15 @@ resource "aws_ecs_task_definition" "nginx_task" {
 }
 
 resource "aws_ecs_service" "nginx_service" {
-  name            = "nginx-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.nginx_task.arn
-  desired_count   = 0
-  deployment_maximum_percent = 200
+  name                               = "nginx-service"
+  cluster                            = aws_ecs_cluster.main.id
+  task_definition                    = aws_ecs_task_definition.nginx_task.arn
+  desired_count                      = 0
+  deployment_maximum_percent         = 200
   deployment_minimum_healthy_percent = 100
   capacity_provider_strategy {
     capacity_provider = aws_ecs_capacity_provider.ecs_capacity_provider.name
-    weight = 100
+    weight            = 100
   }
   network_configuration {
     subnets = module.vpc.public_subnets
@@ -179,17 +186,17 @@ resource "aws_appautoscaling_policy" "task_scaling_policy" {
   service_namespace  = aws_appautoscaling_target.task_scaling_target.service_namespace
 
   step_scaling_policy_configuration {
-    adjustment_type = "ExactCapacity"
-    cooldown = 30
+    adjustment_type         = "ExactCapacity"
+    cooldown                = 30
     metric_aggregation_type = "Minimum"
 
     step_adjustment {
       metric_interval_upper_bound = 1.0
-      scaling_adjustment = 0
+      scaling_adjustment          = 0
     }
     step_adjustment {
       metric_interval_lower_bound = 1.0
-      scaling_adjustment = 3
+      scaling_adjustment          = 3
     }
   }
 }
