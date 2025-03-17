@@ -87,23 +87,14 @@ data "aws_ami" "ecs_ami" {
   # The AMI is optimized for use with ECS and it contains the ECS Agent
   filter {
     name = "name"
-    values = ["al2023-ami-ecs-hvm-*-x86_64"]
+    values = ["al2023-ami-ecs-hvm-*"]
   }
 }
 
 resource "aws_launch_template" "ecs_lt" {
   name_prefix   = "ecs-lt-"
   image_id      = data.aws_ami.ecs_ami.id
-  instance_requirements {
-    memory_mib {
-      min = 512
-      max = 2048
-    }
-    vcpu_count {
-      min = 1
-      max = 2
-    }
-  }
+  instance_type = "t3.micro"
   iam_instance_profile {
     name = aws_iam_instance_profile.ecs_instance_profile.name
   }
@@ -119,17 +110,9 @@ resource "aws_launch_template" "ecs_lt" {
 
 resource "aws_autoscaling_group" "ecs_asg" {
   name = "ecs-asg"
-  mixed_instances_policy {
-    launch_template {
-      launch_template_specification {
-        launch_template_id = aws_launch_template.ecs_lt.id
-        version = "$Latest"
-      }
-    }
-    instances_distribution {
-      on_demand_percentage_above_base_capacity = 0
-      spot_allocation_strategy = "price-capacity-optimized"
-    }
+  launch_template {
+    id      = aws_launch_template.ecs_lt.id
+    version = "$Latest"
   }
   min_size            = 0
   max_size            = 3
